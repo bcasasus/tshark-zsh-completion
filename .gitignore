@@ -1,0 +1,14 @@
+# Local development helper
+dev-install.sh
+
+# Local development backups
+.dev-backups/
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db

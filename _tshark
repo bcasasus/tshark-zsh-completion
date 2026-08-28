@@ -1,0 +1,323 @@
+#compdef tshark
+
+# =========================================================
+# TShark Zsh completion
+# Persistent cache + in-memory cache
+# =========================================================
+
+
+# ---------------------------------------------------------
+# Paths
+# ---------------------------------------------------------
+
+typeset -g _TSHARK_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion"
+typeset -g _TSHARK_FIELDS_FILE="$_TSHARK_CACHE_DIR/fields"
+typeset -g _TSHARK_PROTOCOLS_FILE="$_TSHARK_CACHE_DIR/protocols"
+typeset -g _TSHARK_VERSION_FILE="$_TSHARK_CACHE_DIR/version"
+
+
+# ---------------------------------------------------------
+# In-memory cache
+# ---------------------------------------------------------
+
+typeset -ga _tshark_fields_cache
+typeset -ga _tshark_protocol_cache
+typeset -g _tshark_cache_loaded=0
+
+
+# ---------------------------------------------------------
+# TShark version
+# ---------------------------------------------------------
+
+_tshark_current_version() {
+    tshark --version 2>/dev/null | head -n 1
+}
+
+
+# ---------------------------------------------------------
+# Build persistent cache
+# ---------------------------------------------------------
+
+_tshark_build_cache() {
+    mkdir -p "$_TSHARK_CACHE_DIR"
+
+    local tmp_fields="$_TSHARK_FIELDS_FILE.tmp"
+    local tmp_protocols="$_TSHARK_PROTOCOLS_FILE.tmp"
+    local tmp_version="$_TSHARK_VERSION_FILE.tmp"
+
+    tshark -G fields 2>/dev/null |
+        awk -F '\t' '
+            $1 == "F" {
+                print $3 ":" $2
+            }
+        ' > "$tmp_fields"
+
+    awk -F ':' '
+        {
+            split($1, parts, ".")
+            if (parts[1] != "")
+                print parts[1] "."
+        }
+    ' "$tmp_fields" |
+        sort -u > "$tmp_protocols"
+
+    _tshark_current_version > "$tmp_version"
+
+    mv "$tmp_fields" "$_TSHARK_FIELDS_FILE"
+    mv "$tmp_protocols" "$_TSHARK_PROTOCOLS_FILE"
+    mv "$tmp_version" "$_TSHARK_VERSION_FILE"
+}
+
+
+# ---------------------------------------------------------
+# Validate persistent cache
+# ---------------------------------------------------------
+
+_tshark_ensure_persistent_cache() {
+    local current_version="$(_tshark_current_version)"
+    local cached_version=""
+
+    if [[ -f "$_TSHARK_VERSION_FILE" ]]; then
+        cached_version="$(<$_TSHARK_VERSION_FILE)"
+    fi
+
+    if [[ ! -s "$_TSHARK_FIELDS_FILE" ]] ||
+       [[ ! -s "$_TSHARK_PROTOCOLS_FILE" ]] ||
+       [[ "$cached_version" != "$current_version" ]]
+    then
+        _tshark_build_cache
+    fi
+}
+
+
+# ---------------------------------------------------------
+# Load persistent cache into RAM
+# ---------------------------------------------------------
+
+_tshark_load_cache() {
+    if (( _tshark_cache_loaded )); then
+        return
+    fi
+
+    _tshark_ensure_persistent_cache
+
+    _tshark_fields_cache=(
+        "${(@f)$(<$_TSHARK_FIELDS_FILE)}"
+    )
+
+    _tshark_protocol_cache=(
+        "${(@f)$(<$_TSHARK_PROTOCOLS_FILE)}"
+    )
+
+    _tshark_cache_loaded=1
+}
+
+
+# ---------------------------------------------------------
+# Manual refresh
+# ---------------------------------------------------------
+
+tshark-completion-refresh() {
+    echo "Rebuilding TShark completion cache..."
+
+    rm -rf "$_TSHARK_CACHE_DIR"
+
+    _tshark_fields_cache=()
+    _tshark_protocol_cache=()
+    _tshark_cache_loaded=0
+
+    _tshark_build_cache
+    _tshark_load_cache
+
+    echo "TShark completion cache refreshed."
+}
+
+
+# =========================================================
+# DISPLAY FIELDS (-Y / -e)
+# =========================================================
+
+_tshark_fields() {
+    _tshark_load_cache
+
+    local prefix="$PREFIX"
+    local field
+    local -a matches
+
+    # tshark -Y <TAB>
+    #
+    # Only protocol groups are shown to avoid thousands
+    # of completion candidates.
+    if [[ -z "$prefix" ]]; then
+        _describe 'protocol groups' _tshark_protocol_cache
+        return
+    fi
+
+    # tshark -Y ip.<TAB>
+    matches=()
+
+    for field in "${_tshark_fields_cache[@]}"; do
+        if [[ "$field" == "$prefix"* ]]; then
+            matches+=("$field")
+        fi
+    done
+
+    _describe 'Wireshark fields' matches
+}
+
+
+# =========================================================
+# INTERFACES (-i)
+# =========================================================
+
+_tshark_interfaces() {
+    local -a interfaces
+
+    interfaces=(
+        "${(@f)$(tshark -D 2>/dev/null |
+            sed -E 's/^([0-9]+)\. /\1:/')}"
+    )
+
+    _describe 'capture interfaces' interfaces
+}
+
+
+# =========================================================
+# GLOSSARIES (-G)
+# =========================================================
+
+_tshark_glossaries() {
+    local -a glossaries
+
+    glossaries=(
+        "${(@f)$(tshark -G help 2>/dev/null |
+            awk 'NF { print $1 }')}"
+    )
+
+    _describe 'TShark glossary reports' glossaries
+}
+
+
+# =========================================================
+# STATISTICS (-z)
+# =========================================================
+
+_tshark_statistics() {
+    local -a statistics
+
+    statistics=(
+        "${(@f)$(tshark -z help 2>&1 |
+            awk '
+                /^[[:space:]]*[a-zA-Z0-9_-]+/ {
+                    gsub(/^[[:space:]]+/, "")
+                    print $1
+                }
+            ' |
+            sed 's/,$//' |
+            sort -u)}"
+    )
+
+    _describe 'TShark statistics' statistics
+}
+
+
+# =========================================================
+# CAPTURE FILE FORMATS (-F)
+# =========================================================
+
+_tshark_file_formats() {
+    local -a formats
+
+    formats=(
+        "${(@f)$(tshark -F 2>&1 |
+            awk '
+                /^[[:space:]]*[a-zA-Z0-9_-]+/ {
+                    gsub(/^[[:space:]]+/, "")
+                    print $1
+                }
+            ')}"
+    )
+
+    _describe 'capture file formats' formats
+}
+
+
+# =========================================================
+# CAPTURE FILTERS (-f)
+# BPF / libpcap syntax
+# =========================================================
+
+typeset -ga _tshark_bpf_keywords=(
+    'tcp:TCP packets'
+    'udp:UDP packets'
+    'icmp:ICMP packets'
+    'icmp6:ICMPv6 packets'
+    'ip:IPv4 packets'
+    'ip6:IPv6 packets'
+    'arp:ARP packets'
+    'ether:Ethernet'
+
+    'host:source or destination host'
+    'net:network'
+    'port:port'
+    'portrange:range of ports'
+
+    'src:source qualifier'
+    'dst:destination qualifier'
+
+    'and:logical AND'
+    'or:logical OR'
+    'not:logical NOT'
+
+    'less:packet length less than value'
+    'greater:packet length greater than value'
+
+    'broadcast:broadcast packets'
+    'multicast:multicast packets'
+)
+
+
+_tshark_capture_filter() {
+    _describe 'BPF capture filter syntax' _tshark_bpf_keywords
+}
+
+
+# =========================================================
+# OUTPUT FORMATS (-T)
+# =========================================================
+
+typeset -ga _tshark_output_formats=(
+    'text:human-readable packet summary'
+    'fields:selected fields'
+    'json:JSON'
+    'jsonraw:raw JSON'
+    'ek:Elasticsearch-compatible JSON'
+    'pdml:Packet Details Markup Language'
+    'psml:Packet Summary Markup Language'
+    'tabs:tab-separated packet summary'
+)
+
+
+_tshark_output_format() {
+    _describe 'output format' _tshark_output_formats
+}
+
+
+# =========================================================
+# MAIN COMPLETION
+# =========================================================
+
+_arguments \
+    '-r[read packets from capture file]:capture file:_files' \
+    '-w[write packets to capture file]:capture file:_files' \
+    '-Y[apply Wireshark display filter]:display filter:_tshark_fields' \
+    '-f[apply capture filter]:capture filter:_tshark_capture_filter' \
+    '*-e[output field when using -T fields]:field:_tshark_fields' \
+    '-T[set output format]:format:_tshark_output_format' \
+    '-i[capture from interface]:interface:_tshark_interfaces' \
+    '*-z[statistics module]:statistics:_tshark_statistics' \
+    '-G[dump glossary or internal information]:report:_tshark_glossaries' \
+    '-F[set capture file format]:format:_tshark_file_formats' \
+    '-q[quiet output]' \
+    '-V[verbose packet details]' \
+    '-D[list available capture interfaces]'
