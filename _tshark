@@ -230,12 +230,14 @@ _tshark_file_formats() {
 
     formats=(
         "${(@f)$(tshark -F 2>&1 |
-            awk '
-                /^[[:space:]]*[a-zA-Z0-9_-]+/ {
-                    gsub(/^[[:space:]]+/, "")
-                    print $1
-                }
-            ')}"
+	    awk '
+	        /^[[:space:]]*[a-zA-Z0-9_-]+[[:space:]]+-[[:space:]]+/ {
+	            gsub(/^[[:space:]]+/, "")
+	            value = $1
+	            sub(/^[^[:space:]]+[[:space:]]+-[[:space:]]+/, "")
+	            print value ":" $0
+	        }
+	    ')}"
     )
 
     _describe 'capture file formats' formats
