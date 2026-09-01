@@ -288,22 +288,47 @@ _tshark_capture_filter() {
 # OUTPUT FORMATS (-T)
 # =========================================================
 
-typeset -ga _tshark_output_formats=(
-    'text:human-readable packet summary'
-    'fields:selected fields'
-    'json:JSON'
-    'jsonraw:raw JSON'
-    'ek:Elasticsearch-compatible JSON'
-    'pdml:Packet Details Markup Language'
-    'psml:Packet Summary Markup Language'
-    'tabs:tab-separated packet summary'
-)
+_tshark_output_formats() {
+    local -a formats
 
+    formats=(
+        "${(@f)$(tshark -T __invalid__ 2>&1 |
+            awk '
+                function flush() {
+                    if (value == "")
+                        return
 
-_tshark_output_format() {
-    _describe 'output format' _tshark_output_formats
+                    if (match(desc, /^[^.]*\./))
+                        desc = substr(desc, RSTART, RLENGTH)
+
+                    print value ":" desc
+                }
+
+                /^[[:space:]]*"[^"]+"/ {
+                    flush()
+
+                    match($0, /"[^"]+"/)
+                    value = substr($0, RSTART + 1, RLENGTH - 2)
+
+                    desc = substr($0, RSTART + RLENGTH)
+                    sub(/^[[:space:]]+/, "", desc)
+                    next
+                }
+
+                value != "" && /^[[:space:]]+/ {
+                    line = $0
+                    sub(/^[[:space:]]+/, "", line)
+                    desc = desc " " line
+                }
+
+                END {
+                    flush()
+                }
+            ')}"
+    )
+
+    _describe 'output format' formats
 }
-
 
 # =========================================================
 # MAIN COMPLETION
@@ -315,7 +340,7 @@ _arguments \
     '-Y[apply Wireshark display filter]:display filter:_tshark_fields' \
     '-f[apply capture filter]:capture filter:_tshark_capture_filter' \
     '*-e[output field when using -T fields]:field:_tshark_fields' \
-    '-T[set output format]:format:_tshark_output_format' \
+    '-T[set output format]:format:_tshark_output_formats' \
     '-i[capture from interface]:interface:_tshark_interfaces' \
     '*-z[statistics module]:statistics:_tshark_statistics' \
     '-G[dump glossary or internal information]:report:_tshark_glossaries' \
