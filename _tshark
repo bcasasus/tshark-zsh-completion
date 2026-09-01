@@ -190,8 +190,8 @@ _tshark_glossaries() {
     local -a glossaries
 
     glossaries=(
-        "${(@f)$(tshark -G help 2>/dev/null |
-            awk 'NF { print $1 }')}"
+        "${(@f)$(tshark -G 2>&1 | 
+	    sed -nE 's/^[[:space:]]*-G[[:space:]]+([^[:space:],\[]+)[^[:space:]]*[[:space:]]+(.*)$/\1:\2/p')}"
     )
 
     _describe 'TShark glossary reports' glossaries
