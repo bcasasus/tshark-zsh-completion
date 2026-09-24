@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="144" viewBox="0 0 1000 144" role="img" aria-labelledby="title description">
+  <title id="title">Work in progress</title>
+  <desc id="description">TShark Zsh completion is under active development.</desc>
+  <rect width="1000" height="144" rx="14" fill="#14212c"/>
+  <rect x="1" y="1" width="998" height="142" rx="13" fill="none" stroke="#e5aa40" stroke-width="2"/>
+  <path d="M71 32 30 104h82L71 32Z" fill="none" stroke="#ffc369" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M71 57v23" stroke="#ffc369" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="71" cy="92" r="3.5" fill="#ffc369"/>
+  <text x="142" y="70" fill="#fff5e4" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="700" letter-spacing="2">WORK IN PROGRESS</text>
+  <text x="144" y="104" fill="#c9d4dc" font-family="Arial, Helvetica, sans-serif" font-size="20">TShark Zsh completion is under active development</text>
+</svg>

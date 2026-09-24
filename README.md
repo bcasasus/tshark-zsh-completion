@@ -1,3 +1,5 @@
+![Work in progress](assets/wip-banner.svg)
+
 # TShark Zsh completion
 
 Context-aware tab completion for [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) in Zsh. It helps you discover command options, capture interfaces, output formats and Wireshark fields while typing commands. Most suggestions come from **your installed TShark**, so they follow its version and available dissectors.
