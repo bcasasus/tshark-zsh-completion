@@ -1,14 +1,26 @@
 ![Work in progress](assets/wip-banner.svg)
 
-# TShark Zsh completion
+# TShark Zsh Completion
 
-Context-aware tab completion for [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) in Zsh. It helps you discover command options, capture interfaces, output formats and Wireshark fields while typing commands. Most suggestions come from **your installed TShark**, so they follow its version and available dissectors.
+Context-aware tab completion for [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) in Zsh.
 
-For example, type `tshark -Y ip.<TAB>` to see available `ip` fields, or `tshark -T <TAB>` for output formats. You can also complete `-e` fields, `-i` interfaces, `-G` reports, `-z` statistics, `-F` capture file formats and a small set of `-f` capture filter keywords. File paths complete for `-r` and `-w`.
+It helps you discover TShark options, capture interfaces, output formats, statistics and Wireshark fields directly from the command line. Most suggestions are generated from **your installed TShark**, so completions stay aligned with its version and available dissectors.
 
-## Install
+```sh
+tshark -Y ip.<TAB>   # Wireshark fields
+tshark -T <TAB>      # output formats
+tshark -i <TAB>      # capture interfaces
+```
 
-Requirements: **Zsh**, **TShark** on `PATH`, and standard Unix utilities (`awk`, `sed`, `sort`, `head`, `mkdir`, `mv`, `cp`, `grep`, `cmp`, `mktemp`).
+Also supported: `-e`, `-G`, `-z`, `-F`, basic `-f` capture filter keywords, and file completion for `-r` and `-w`.
+
+## Installation
+
+### Requirements
+
+* Zsh
+* TShark available on `PATH`
+* Standard Unix utilities such as `awk`, `sed`, `sort`, `grep` and `mktemp`
 
 ```sh
 git clone https://github.com/bcasasus/tshark-zsh-completion.git
@@ -17,38 +29,122 @@ sh install.sh
 exec zsh
 ```
 
-The installer copies `_tshark` to `${ZDOTDIR:-$HOME}/.zsh/completions`, adds that directory to `fpath` near the top of `.zshrc` (before existing completion initialization), and initializes completion if your `.zshrc` does not already do so. It backs up a different existing `_tshark` file before replacing it. Re-running the installer updates the completion without duplicating the `fpath` entry.
+The installer places `_tshark` in:
 
-Try `tshark -<TAB>` in a **new interactive Zsh** session. If your shell still uses an older completion, run `rm -f "${ZDOTDIR:-$HOME}"/.zcompdump*` and `exec zsh`.
+```text
+${ZDOTDIR:-$HOME}/.zsh/completions
+```
 
-### Manual install
+and configures that directory in your Zsh `fpath`. Existing installations can be safely updated by running the installer again.
 
-Copy `_tshark` into a directory on your Zsh `fpath`. For example, copy it to `~/.zsh/completions/_tshark`, then put this **before** any `compinit` or plugin manager in `.zshrc`:
+Test it in a new Zsh session:
+
+```sh
+tshark -<TAB>
+```
+
+If Zsh still loads an older completion:
+
+```sh
+rm -f "${ZDOTDIR:-$HOME}"/.zcompdump*
+exec zsh
+```
+
+### Manual installation
+
+Copy `_tshark` to a directory in your Zsh `fpath`, for example:
+
+```text
+~/.zsh/completions/_tshark
+```
+
+Then add this before `compinit` or your plugin manager in `.zshrc`:
 
 ```zsh
 fpath=(~/.zsh/completions $fpath)
 ```
 
-If your configuration does not initialize Zsh completion yet, also add `autoload -Uz compinit; compinit` after that line. Restart Zsh.
+If completion is not already initialized:
+
+```zsh
+autoload -Uz compinit
+compinit
+```
+
+Restart Zsh.
 
 ## Supported systems
 
-This is a **Zsh** completion, so it does not work in Bash, Fish or PowerShell. Its shell code and installer use Unix utilities. It is designed for Linux and macOS where Zsh and TShark are installed; it should also work on other Unix-like systems with those commands, but those systems have not been tested here. Native Windows is not supported; WSL with Zsh and TShark follows the Linux setup. The completion depends on TShark's help output, which can vary between versions, so some dynamic suggestions may vary too.
+Designed for:
+
+* Linux
+* macOS
+* WSL with Zsh and TShark
+
+Other Unix-like systems may also work if the required commands are available.
+
+This is a **Zsh-only** completion and does not support Bash, Fish, PowerShell or native Windows shells.
 
 ## How it works
 
-For `-Y` and `-e`, the completion builds a list of registered Wireshark fields from `tshark -G fields`. To avoid showing thousands of suggestions at once, an empty value first offers protocol prefixes (`ip.`, `tcp.`, etc.); typing a prefix narrows the list. The fields are cached on disk under `${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion` and in memory for the current shell. The disk cache rebuilds when the TShark version changes.
+Wireshark fields for `-Y` and `-e` are generated from:
 
-If you add a dissector without changing the TShark version, rebuild the cache in a Zsh session after using the completion at least once:
+```sh
+tshark -G fields
+```
+
+To avoid displaying thousands of candidates at once, completion first suggests protocol prefixes such as:
+
+```text
+ip.
+tcp.
+http.
+dns.
+```
+
+Typing a prefix then narrows the available fields.
+
+Generated data is cached under:
+
+```text
+${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion
+```
+
+The cache is automatically rebuilt when the installed TShark version changes.
+
+To rebuild it manually:
 
 ```zsh
 tshark-completion-refresh
 ```
 
-This project covers a useful subset of TShark options. It suggests field names by prefix, but does not parse complete display filter expressions or BPF capture filter syntax. See [features and limitations](docs/architecture.md) and the [technical guide](docs/technical-guide.md) for details.
+The project currently covers a useful subset of TShark and does not yet parse complete Wireshark display filter expressions or full BPF syntax.
+
+See the [architecture and limitations](docs/architecture.md), [technical guide](docs/technical-guide.md), and [roadmap](docs/ROADMAP.md) for more details.
 
 ## Uninstall
 
-Remove `${ZDOTDIR:-$HOME}/.zsh/completions/_tshark` and the three-line block between `# >>> tshark-zsh-completion >>>` and `# <<< tshark-zsh-completion <<<` in `.zshrc`. If the installer added `autoload -Uz compinit` and `compinit`, remove those two lines only if no other completion uses them. Optionally remove `${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion`.
+Remove:
 
-Licensed under the [MIT License](LICENSE).
+```text
+${ZDOTDIR:-$HOME}/.zsh/completions/_tshark
+```
+
+Then delete the block between:
+
+```text
+# >>> tshark-zsh-completion >>>
+# <<< tshark-zsh-completion <<<
+```
+
+from `.zshrc`.
+
+Optionally remove the cache:
+
+```sh
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion"
+```
+
+## License
+
+[MIT](LICENSE)
