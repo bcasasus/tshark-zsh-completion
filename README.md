@@ -120,7 +120,7 @@ tshark-completion-refresh
 
 The project currently covers a useful subset of TShark and does not yet parse complete Wireshark display filter expressions or full BPF syntax.
 
-See the [architecture and limitations](docs/architecture.md), [technical guide](docs/technical-guide.md), and [roadmap](docs/ROADMAP.md) for more details.
+See the [architecture and limitations](docs/architecture.md), [technical guide](docs/technical-guide.md), and [roadmap](docs/roadmap.md) for more details.
 
 ## Uninstall
 
