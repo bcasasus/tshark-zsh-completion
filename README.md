@@ -110,13 +110,19 @@ Generated data is cached under:
 ${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion
 ```
 
-The cache is automatically rebuilt when the installed TShark version changes.
+The cache is rebuilt when a new Zsh session first loads it after a TShark
+version change. A shell that has already loaded fields keeps them in memory
+until you refresh it or start another session. Failed rebuilds retain the
+previous cache.
 
 To rebuild it manually:
 
 ```zsh
 tshark-completion-refresh
 ```
+
+To run the regression checks, use `zsh tests/cache.zsh`. They use a simulated
+TShark executable and do not require a packet capture or an installed TShark.
 
 The project currently covers a useful subset of TShark and does not yet parse complete Wireshark display filter expressions or full BPF syntax.
 
