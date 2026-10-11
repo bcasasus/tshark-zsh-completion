@@ -1,4 +1,4 @@
-![Work in progress](assets/wip-banner.svg)
+![Work in progress](assets/banner.png)
 
 # TShark Zsh completion
 
