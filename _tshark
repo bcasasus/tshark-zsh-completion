@@ -11,9 +11,7 @@
 # ---------------------------------------------------------
 
 typeset -g _TSHARK_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion"
-typeset -g _TSHARK_FIELDS_FILE="$_TSHARK_CACHE_DIR/fields"
-typeset -g _TSHARK_PROTOCOLS_FILE="$_TSHARK_CACHE_DIR/protocols"
-typeset -g _TSHARK_VERSION_FILE="$_TSHARK_CACHE_DIR/version"
+typeset -g _TSHARK_CURRENT_FILE="$_TSHARK_CACHE_DIR/current"
 
 
 # ---------------------------------------------------------
@@ -39,33 +37,64 @@ _tshark_current_version() {
 # ---------------------------------------------------------
 
 _tshark_build_cache() {
-    mkdir -p "$_TSHARK_CACHE_DIR"
+    setopt localoptions pipefail
+    mkdir -p -- "$_TSHARK_CACHE_DIR" || return 1
 
-    local tmp_fields="$_TSHARK_FIELDS_FILE.tmp"
-    local tmp_protocols="$_TSHARK_PROTOCOLS_FILE.tmp"
-    local tmp_version="$_TSHARK_VERSION_FILE.tmp"
+    local generation raw link version
+    generation=$(mktemp -d "$_TSHARK_CACHE_DIR/generation.XXXXXXXX") || return 1
+    raw="$generation/raw"
+    version=$(_tshark_current_version)
+    if [[ -z "$version" ]] || ! tshark -G fields > "$raw" 2>/dev/null; then
+        rm -rf -- "$generation"
+        return 1
+    fi
 
-    tshark -G fields 2>/dev/null |
-        awk -F '\t' '
+    if ! awk -F '\t' '
             $1 == "F" {
                 print $3 ":" $2
             }
-        ' > "$tmp_fields"
+        ' "$raw" > "$generation/fields"; then
+        rm -rf -- "$generation"
+        return 1
+    fi
+    rm -f -- "$raw"
 
-    awk -F ':' '
+    if ! awk -F ':' '
         {
             split($1, parts, ".")
             if (parts[1] != "")
                 print parts[1] "."
         }
-    ' "$tmp_fields" |
-        sort -u > "$tmp_protocols"
+    ' "$generation/fields" | sort -u > "$generation/protocols"; then
+        rm -rf -- "$generation"
+        return 1
+    fi
+    if [[ ! -s "$generation/fields" || ! -s "$generation/protocols" ]]; then
+        rm -rf -- "$generation"
+        return 1
+    fi
+    if ! print -r -- "$version" > "$generation/version"; then
+        rm -rf -- "$generation"
+        return 1
+    fi
 
-    _tshark_current_version > "$tmp_version"
+    # Readers resolve one immutable generation. Concurrent writers each get
+    # their own directory, and the pointer is published with one rename.
+    link=$(mktemp "$_TSHARK_CACHE_DIR/.current.XXXXXXXX") || return 1
+    if ! print -r -- "${generation:t}" > "$link" ||
+       ! mv -f -- "$link" "$_TSHARK_CURRENT_FILE"; then
+        rm -f -- "$link"
+        rm -rf -- "$generation"
+        return 1
+    fi
+}
 
-    mv "$tmp_fields" "$_TSHARK_FIELDS_FILE"
-    mv "$tmp_protocols" "$_TSHARK_PROTOCOLS_FILE"
-    mv "$tmp_version" "$_TSHARK_VERSION_FILE"
+_tshark_active_generation() {
+    local name
+    [[ -f "$_TSHARK_CURRENT_FILE" ]] || return 1
+    name="$(<"$_TSHARK_CURRENT_FILE")"
+    [[ "$name" =~ '^generation\.[A-Za-z0-9]{8}$' ]] || return 1
+    print -r -- "$_TSHARK_CACHE_DIR/$name"
 }
 
 
@@ -76,16 +105,19 @@ _tshark_build_cache() {
 _tshark_ensure_persistent_cache() {
     local current_version="$(_tshark_current_version)"
     local cached_version=""
+    local generation
 
-    if [[ -f "$_TSHARK_VERSION_FILE" ]]; then
-        cached_version="$(<$_TSHARK_VERSION_FILE)"
+    [[ -n "$current_version" ]] || return 1
+    generation=$(_tshark_active_generation) || generation=''
+    if [[ -f "$generation/version" ]]; then
+        cached_version="$(<"$generation/version")"
     fi
 
-    if [[ ! -s "$_TSHARK_FIELDS_FILE" ]] ||
-       [[ ! -s "$_TSHARK_PROTOCOLS_FILE" ]] ||
+    if [[ ! -s "$generation/fields" ]] ||
+       [[ ! -s "$generation/protocols" ]] ||
        [[ "$cached_version" != "$current_version" ]]
     then
-        _tshark_build_cache
+        _tshark_build_cache || return 1
     fi
 }
 
@@ -99,14 +131,19 @@ _tshark_load_cache() {
         return
     fi
 
-    _tshark_ensure_persistent_cache
+    _tshark_ensure_persistent_cache || return 1
+
+    # Resolve once so both files come from the same generation even if
+    # another shell publishes a new one while we read them.
+    local generation
+    generation=$(_tshark_active_generation) || return 1
 
     _tshark_fields_cache=(
-        "${(@f)$(<$_TSHARK_FIELDS_FILE)}"
+        "${(@f)$(<"$generation/fields")}"
     )
 
     _tshark_protocol_cache=(
-        "${(@f)$(<$_TSHARK_PROTOCOLS_FILE)}"
+        "${(@f)$(<"$generation/protocols")}"
     )
 
     _tshark_cache_loaded=1
@@ -119,15 +156,12 @@ _tshark_load_cache() {
 
 tshark-completion-refresh() {
     echo "Rebuilding TShark completion cache..."
-
-    rm -rf "$_TSHARK_CACHE_DIR"
-
-    _tshark_fields_cache=()
-    _tshark_protocol_cache=()
+    if ! _tshark_build_cache; then
+        print -u2 'TShark completion cache refresh failed; previous cache retained.'
+        return 1
+    fi
     _tshark_cache_loaded=0
-
-    _tshark_build_cache
-    _tshark_load_cache
+    _tshark_load_cache || return 1
 
     echo "TShark completion cache refreshed."
 }
@@ -138,7 +172,7 @@ tshark-completion-refresh() {
 # =========================================================
 
 _tshark_fields() {
-    _tshark_load_cache
+    _tshark_load_cache || return 1
 
     local prefix="$PREFIX"
     local field

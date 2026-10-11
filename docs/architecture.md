@@ -139,10 +139,20 @@ Normally:
 
 ```text
 ~/.cache/tshark-completion/
-├── fields
-├── protocols
-└── version
+├── current                    # active generation name
+├── generation.XXXXXXXX/
+│   ├── fields
+│   ├── protocols
+│   └── version
+└── generation.YYYYYYYY/       # previous generation, if any
 ```
+
+The files in each generation are immutable. A successful build publishes a
+new generation by atomically replacing `current`. Failed builds retain the
+previous generation. Unique directories allow concurrent shells to build
+without sharing temporary files. Old generations are kept so readers can
+finish safely; removing the cache directory when completion is idle clears
+them.
 
 #### `fields`
 
@@ -188,7 +198,7 @@ cached TShark version
 current TShark version
 ```
 
-If the version changed, the cache is rebuilt automatically.
+If the version changed, the cache is rebuilt when a shell next loads the persistent cache. A shell that has already loaded the arrays keeps them until a manual refresh or a new session.
 
 This avoids keeping stale field data after a normal TShark/Wireshark upgrade.
 
@@ -234,14 +244,9 @@ The completion provides:
 tshark-completion-refresh
 ```
 
-This:
-
-1. Deletes the persistent cache.
-2. Clears the in-memory arrays.
-3. Runs `tshark -G fields` again.
-4. Recreates the protocol list.
-5. Stores the current TShark version.
-6. Reloads everything into RAM.
+This builds and validates a new generation before switching the pointer,
+then reloads the in-memory arrays. If building fails, the current generation
+and in-memory arrays remain available.
 
 This is especially useful after installing a dissector or plugin without changing the TShark version.
 
@@ -443,9 +448,10 @@ Generated from the installed TShark:
 ```text
 -Y / -e   tshark -G fields
 -i        tshark -D
--G        tshark -G help
+-G        tshark -G (diagnostic output)
 -z        tshark -z help
 -F        tshark -F
+-T        tshark -T __invalid__ (diagnostic output)
 ```
 
 Advantages:
@@ -460,11 +466,11 @@ Advantages:
 Currently hardcoded:
 
 ```text
--T output formats
 -f common BPF keywords
 ```
 
-These datasets are small enough that static definitions keep the completion simple.
+This small vocabulary is kept static. The `-G`, `-F`, and `-T` parsers depend
+on TShark's human-readable output and may need updates across versions.
 
 ## 5. Performance Strategy
 

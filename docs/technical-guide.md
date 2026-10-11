@@ -98,366 +98,35 @@ typeset -ga _tshark_protocol_cache
 
 The leading underscore is a convention used to reduce collisions with normal shell variables/functions.
 
-## 4. Cache Paths
-
-The cache directory is defined as:
-
-```zsh
-typeset -g _TSHARK_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion"
-```
-
-The syntax:
-
-```zsh
-${XDG_CACHE_HOME:-$HOME/.cache}
-```
-
-means:
-
-```text
-if XDG_CACHE_HOME has a value:
-    use it
-otherwise:
-    use $HOME/.cache
-```
-
-Three files are derived from it:
-
-```zsh
-typeset -g _TSHARK_FIELDS_FILE="$_TSHARK_CACHE_DIR/fields"
-typeset -g _TSHARK_PROTOCOLS_FILE="$_TSHARK_CACHE_DIR/protocols"
-typeset -g _TSHARK_VERSION_FILE="$_TSHARK_CACHE_DIR/version"
-```
-
-## 5. `_tshark_current_version`
-
-```zsh
-_tshark_current_version() {
-    tshark --version 2>/dev/null | head -n 1
-}
-```
-
-This returns only the first line of `tshark --version`.
-
-### `2>/dev/null`
-
-Redirects standard error to `/dev/null`, preventing warnings from polluting completion output.
-
-### `| head -n 1`
-
-Keeps only the first line, producing a compact version identifier for cache invalidation.
-
-## 6. `_tshark_build_cache`
-
-This function generates persistent data.
-
-### 6.1 Create cache directory
-
-```zsh
-mkdir -p "$_TSHARK_CACHE_DIR"
-```
-
-`-p` creates missing parent directories and does not fail if the directory already exists.
-
-### 6.2 Temporary files
-
-```zsh
-local tmp_fields="$_TSHARK_FIELDS_FILE.tmp"
-local tmp_protocols="$_TSHARK_PROTOCOLS_FILE.tmp"
-local tmp_version="$_TSHARK_VERSION_FILE.tmp"
-```
-
-`local` limits these variables to the function.
-
-Temporary files allow this pattern:
-
-```text
-generate .tmp
-    ↓
-finish successfully
-    ↓
-mv .tmp final-file
-```
-
-This is safer than writing directly into the active cache.
-
-## 7. Parsing `tshark -G fields`
-
-The core generation pipeline is:
-
-```zsh
-tshark -G fields 2>/dev/null |
-    awk -F '\t' '
-        $1 == "F" {
-            print $3 ":" $2
-        }
-    ' > "$tmp_fields"
-```
-
-### 7.1 `tshark -G fields`
-
-Returns TShark/Wireshark's registered protocol and field information.
-
-The output is tab-separated.
-
-### 7.2 `awk -F '\t'`
-
-`-F` sets AWK's input field separator.
-
-Here it means:
-
-```text
-split each line on TAB characters
-```
-
-AWK exposes fields as:
-
-```text
-$1
-$2
-$3
-...
-```
-
-### 7.3 `$1 == "F"`
-
-The condition:
-
-```awk
-$1 == "F"
-```
-
-keeps only records representing actual fields.
-
-### 7.4 `print $3 ":" $2`
-
-Builds:
-
-```text
-field.name:Description
-```
-
-For example:
-
-```text
-ip.src:Source Address
-tcp.stream:Stream index
-dns.qry.name:Query Name
-```
-
-This is useful because Zsh `_describe` understands `value:description` pairs.
-
-## 8. Building the Protocol Cache
-
-The second pipeline reads the fields file:
-
-```zsh
-awk -F ':' '
-    {
-        split($1, parts, ".")
-        if (parts[1] != "")
-            print parts[1] "."
-    }
-' "$tmp_fields" |
-    sort -u > "$tmp_protocols"
-```
-
-Suppose the fields file contains:
-
-```text
-ip.src:Source Address
-ip.dst:Destination Address
-tcp.srcport:Source Port
-tcp.dstport:Destination Port
-```
-
-Using `-F ':'` gives:
-
-```text
-$1 = ip.src
-```
-
-Then:
-
-```awk
-split($1, parts, ".")
-```
-
-creates:
-
-```text
-parts[1] = ip
-parts[2] = src
-```
-
-and prints:
-
-```text
-ip.
-```
-
-Because there are many duplicates, `sort -u` sorts and removes them.
-
-This compact protocol list is what makes empty `-Y <TAB>` completion fast.
-
-## 9. Storing the Version
-
-```zsh
-_tshark_current_version > "$tmp_version"
-```
-
-writes the current version to a temporary file.
-
-Then:
-
-```zsh
-mv "$tmp_fields" "$_TSHARK_FIELDS_FILE"
-mv "$tmp_protocols" "$_TSHARK_PROTOCOLS_FILE"
-mv "$tmp_version" "$_TSHARK_VERSION_FILE"
-```
-
-promotes all completed temporary files to the active cache.
-
-## 10. `_tshark_ensure_persistent_cache`
-
-This decides whether cache generation is necessary.
-
-```zsh
-local current_version="$(_tshark_current_version)"
-local cached_version=""
-```
-
-### Command substitution
-
-```zsh
-$(_tshark_current_version)
-```
-
-runs the function and inserts its output.
-
-### Reading a file with Zsh
-
-```zsh
-cached_version="$(<$_TSHARK_VERSION_FILE)"
-```
-
-is a Zsh shortcut for reading a file without starting an external `cat` process.
-
-### Cache validity test
-
-```zsh
-if [[ ! -s "$_TSHARK_FIELDS_FILE" ]] ||
-   [[ ! -s "$_TSHARK_PROTOCOLS_FILE" ]] ||
-   [[ "$cached_version" != "$current_version" ]]
-then
-    _tshark_build_cache
-fi
-```
-
-`-s file` means the file exists and has a size greater than zero.
-
-The cache is rebuilt when:
-
-- `fields` is absent or empty;
-- `protocols` is absent or empty;
-- the cached TShark version differs from the current one.
-
-## 11. `_tshark_load_cache`
-
-This loads persistent data into RAM.
-
-```zsh
-if (( _tshark_cache_loaded )); then
-    return
-fi
-```
-
-`(( ... ))` is Zsh arithmetic context. A non-zero value is true.
-
-So this means:
-
-```text
-if already loaded:
-    stop immediately
-```
-
-### Reading file lines into arrays
-
-```zsh
-_tshark_fields_cache=(
-    "${(@f)$(<$_TSHARK_FIELDS_FILE)}"
-)
-```
-
-This is Zsh-specific syntax.
-
-Conceptually:
-
-```text
-$(<file)  → read file
-(@f)      → split on newlines into array elements
-```
-
-A file containing:
-
-```text
-ip.src:Source Address
-ip.dst:Destination Address
-```
-
-becomes conceptually:
-
-```zsh
-_tshark_fields_cache=(
-    'ip.src:Source Address'
-    'ip.dst:Destination Address'
-)
-```
-
-Finally:
-
-```zsh
-_tshark_cache_loaded=1
-```
-
-marks the in-memory cache as ready.
-
-## 12. Manual Refresh Function
-
-```zsh
-tshark-completion-refresh() {
-    ...
-}
-```
-
-This function intentionally does not start with `_` because it is meant to be executed directly by the user.
-
-The sequence is:
-
-```zsh
-rm -rf "$_TSHARK_CACHE_DIR"
-```
-
-Delete persistent cache.
-
-```zsh
-_tshark_fields_cache=()
-_tshark_protocol_cache=()
-_tshark_cache_loaded=0
-```
-
-Reset RAM state.
-
-Then:
-
-```zsh
-_tshark_build_cache
-_tshark_load_cache
-```
-
-rebuild and immediately reload the cache.
-
-## 13. `_tshark_fields`
+## 4. Cache generation and loading
+
+`_TSHARK_CACHE_DIR` is `${XDG_CACHE_HOME:-$HOME/.cache}/tshark-completion`.
+The `current` file contains the name of one immutable `generation.XXXXXXXX`
+directory. Each generation contains `fields`, `protocols`, and `version`.
+
+`_tshark_build_cache` creates a unique generation directory, captures
+`tshark -G fields` separately so its exit status can be checked, and extracts
+`F` records as `field.name:Description`. It derives distinct protocol prefixes
+from the fields. Empty results or a failed TShark command are rejected.
+Only after all three files are valid does it atomically replace the `current`
+pointer file. Concurrent builders do not write into each other's directory.
+A failed rebuild leaves the previous pointer intact. Old generations remain
+on disk so a reader that resolved the previous pointer can finish safely;
+removing the entire cache directory clears them when no completion is running.
+
+`_tshark_ensure_persistent_cache` compares the active generation's version
+with the first line of `tshark --version` and checks that both data files are
+nonempty. `_tshark_load_cache` resolves the pointer once, then reads both files
+into Zsh arrays. It sets `_tshark_cache_loaded=1` only after a successful load.
+Subsequent completions in the same shell use those arrays without rechecking
+TShark's version. `tshark-completion-refresh` builds a new generation first;
+on failure, the existing cache and in-memory arrays stay available.
+
+`-G`, `-F`, and `-T` use separate on-demand commands; they are not part of
+this field cache. Their output parsers are covered by `tests/cache.zsh` with
+representative command output.
+
+## 5. `_tshark_fields`
 
 This is the most important completion function.
 
@@ -472,7 +141,7 @@ _tshark_fields() {
 }
 ```
 
-### 13.1 `$PREFIX`
+### 5.1 `$PREFIX`
 
 `PREFIX` is supplied by Zsh's completion system and represents the text already typed in the current word.
 
@@ -484,7 +153,7 @@ tshark -Y ip.<TAB>    → PREFIX="ip."
 tshark -Y tcp.f<TAB>  → PREFIX="tcp.f"
 ```
 
-### 13.2 Empty-prefix optimization
+### 5.2 Empty-prefix optimization
 
 ```zsh
 if [[ -z "$prefix" ]]; then
@@ -497,7 +166,7 @@ fi
 
 Instead of passing every Wireshark field to Zsh, the completion passes only protocol prefixes.
 
-### 13.3 Prefix filtering
+### 5.3 Prefix filtering
 
 ```zsh
 matches=()
@@ -531,7 +200,7 @@ matches+=("$field")
 
 appends it to the result array.
 
-### 13.4 `_describe`
+### 5.4 `_describe`
 
 ```zsh
 _describe 'Wireshark fields' matches
@@ -551,7 +220,7 @@ ip.src:Source Address
 
 can be presented as candidate `ip.src` with description `Source Address`.
 
-## 14. Interface Completion
+## 6. Interface Completion
 
 ```zsh
 _tshark_interfaces() {
@@ -600,7 +269,7 @@ into:
 
 which fits `_describe`'s `value:description` convention.
 
-## 15. Glossary Completion
+## 7. Glossary Completion
 
 ```zsh
 _tshark_glossaries() {
@@ -633,7 +302,7 @@ means:
 for every non-empty line, print the first field
 ```
 
-## 16. Statistics Completion
+## 8. Statistics Completion
 
 The source is:
 
@@ -684,7 +353,7 @@ removes a comma at the end of a result.
 
 sorts and removes duplicates.
 
-## 17. Capture File Format Completion
+## 9. Capture File Format Completion
 
 `_tshark_file_formats` follows the same general pattern:
 
@@ -700,7 +369,7 @@ _describe
 
 Understanding this pattern makes it easy to add new dynamic completion sources.
 
-## 18. Static BPF Completion
+## 10. Static BPF Completion
 
 The BPF list is stored as an array:
 
@@ -727,23 +396,14 @@ _tshark_capture_filter() {
 
 This is an example of when a static dataset is preferable to a dynamic shell pipeline.
 
-## 19. Static `-T` Output Formats
+## 11. Dynamic `-T` Output Formats
 
-The same pattern is used for output formats:
+`_tshark_output_formats` invokes `tshark -T __invalid__` and parses the
+supported format names in TShark's diagnostic output. This source is dynamic
+but sensitive to changes in that diagnostic format. Keep its fixture test
+current when supporting another TShark version.
 
-```zsh
-typeset -ga _tshark_output_formats=(...)
-```
-
-then:
-
-```zsh
-_tshark_output_format() {
-    _describe 'output format' _tshark_output_formats
-}
-```
-
-## 20. `_arguments`
+## 12. `_arguments`
 
 The bottom of the file connects TShark options to completion functions.
 
@@ -768,7 +428,7 @@ Read it as:
            _tshark_fields
 ```
 
-### 20.1 File completion
+### 12.1 File completion
 
 ```zsh
 '-r[read packets from capture file]:capture file:_files'
@@ -784,7 +444,7 @@ tshark -r <TAB>
 
 shows filesystem candidates.
 
-### 20.2 Repeatable options
+### 12.2 Repeatable options
 
 ```zsh
 '*-e[...]'
@@ -800,7 +460,7 @@ Likewise:
 
 This matches legitimate TShark usage where multiple `-e` or `-z` arguments can appear.
 
-## 21. Common Patterns for Extending the Script
+## 13. Common Patterns for Extending the Script
 
 ### Pattern A — Static completion
 
@@ -858,7 +518,7 @@ _describe
 
 This is the model currently used for fields.
 
-## 22. How to Add Another TShark Option
+## 14. How to Add Another TShark Option
 
 Suppose a future option `-X` accepts a small set of values.
 
@@ -883,7 +543,7 @@ Then add to `_arguments`:
 
 That is the basic extension workflow.
 
-## 23. How to Debug the Completion
+## 15. How to Debug the Completion
 
 Confirm the completion function being used:
 
@@ -926,7 +586,7 @@ Force cache refresh:
 tshark-completion-refresh
 ```
 
-## 24. Things to Be Careful With
+## 16. Things to Be Careful With
 
 ### Quoting
 
@@ -966,7 +626,7 @@ Even when generating candidates is fast, passing tens of thousands of entries to
 
 That is why empty `-Y` completion returns protocol groups instead of every field.
 
-## 25. Current Technical Boundaries
+## 17. Current Technical Boundaries
 
 The current implementation is deliberately **not**:
 
